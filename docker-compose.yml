@@ -1,0 +1,47 @@
+# ============================================================================
+# SMARTFACTORY ECOSYSTEM - DOCKER COMPOSE
+# Jembatan Logika Laravel:
+# File ini sepadan dengan `docker-compose.yml` bawaan Laravel Sail.
+# Bedanya, nantinya file ini akan mengorkestrasi 4 service berbeda bahasa
+# (Golang, NestJS, Express, Angular) di dalam satu jaringan virtual pabrik.
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # INFRASTRUKTUR DATABASE PUSAT PABRIK (MySQL 8.0)
+  # --------------------------------------------------------------------------
+  mysql-db:
+    image: mysql:8.0
+    container_name: smartfactory-mysql
+    restart: unless-stopped
+    environment:
+      # Sepadan dengan DB_DATABASE, DB_USERNAME, DB_PASSWORD di file .env Laravel
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: smartfactory_db
+      MYSQL_USER: factory_user
+      MYSQL_PASSWORD: factory_password
+    ports:
+      # Port 3307 di komputer host -> Port 3306 di dalam container Docker
+      # Menggunakan 3307 di sisi host agar tidak bentrok jika di laptop Anda
+      # sudah ada MySQL lokal (Laragon/XAMPP/DBngin) yang memakai port 3306.
+      - "3307:3306"
+    volumes:
+      # Named volume agar data stok gudang & OEE tidak hilang saat container dimatikan
+      - mysql_factory_data:/var/lib/mysql
+    networks:
+      - smartfactory-net
+    healthcheck:
+      # Memastikan MySQL benar-benar siap menerima koneksi sebelum backend Go/NestJS menyala
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Jaringan internal virtual antar container (seperti LAN lokal di dalam pabrik)
+networks:
+  smartfactory-net:
+    driver: bridge
+
+# Penyimpanan persisten di sisi host
+volumes:
+  mysql_factory_data:

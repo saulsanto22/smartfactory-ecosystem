@@ -1,0 +1,46 @@
+# ============================================================================
+# SMARTFACTORY ECOSYSTEM - MONOREPO GITIGNORE
+# ============================================================================
+
+# Node.js (Express, NestJS, Angular)
+node_modules/
+dist/
+.angular/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Golang (Warehouse Service)
+warehouse-service/main
+warehouse-service/warehouse-service
+*.exe
+*.out
+*.test
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Uploaded Files (tetap simpan foldernya, abaikan isinya)
+warehouse-service/uploads/*
+!warehouse-service/uploads/.gitkeep
+oee-service/uploads/*
+!oee-service/uploads/.gitkeep
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# AI Mentor Rules & Local Planning Notes (Tetap di lokal, tidak ikut di-push ke GitHub)
+.cursorrules
+GEMINI.md
+ANALISIS-SISTEM.md
+SPRINT-BACKLOG.md
+.agents/
+.agent/
+

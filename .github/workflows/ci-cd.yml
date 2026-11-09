@@ -1,0 +1,150 @@
+# ============================================================================
+# SMARTFACTORY ECOSYSTEM - POLYGLOT MONOREPO CI/CD PIPELINE (GitHub Actions)
+# ============================================================================
+# Filosofi DevOps Pabrik:
+# Di arsitektur Monorepo Microservices, setiap kali developer melakukan `git push`
+# atau membuka Pull Request ke branch `main`, pipeline CI/CD ini menjalankan:
+#   1. 4 Job Continuous Integration (CI) secara PARALEL untuk menguji kompilasi
+#      keempat bahasa/framework (Express.js, Golang, NestJS, Angular).
+#   2. 1 Job Continuous Delivery / Deployment Verification (CD) yang baru jalan
+#      JIKA keempat job CI di atas lulus 100%, untuk membuild seluruh Docker Image.
+# ============================================================================
+
+name: SmartFactory Polyglot CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # --------------------------------------------------------------------------
+  # JOB 1 (CI): INCIDENT ALERT GATEWAY (Express.js)
+  # --------------------------------------------------------------------------
+  ci-incident-gateway:
+    name: "🚨 CI: Incident Gateway (Express.js)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./incident-gateway
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: incident-gateway/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Verify Syntax & Entrypoint
+        run: node -c server.js
+
+  # --------------------------------------------------------------------------
+  # JOB 2 (CI): WAREHOUSE & INVENTORY SERVICE (Golang)
+  # --------------------------------------------------------------------------
+  ci-warehouse-service:
+    name: "📦 CI: Warehouse Service (Golang)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./warehouse-service
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: warehouse-service/go.sum
+
+      - name: Download Go Modules
+        run: go mod download
+
+      - name: Run Static Analysis (go vet)
+        run: go vet ./...
+
+      - name: Compile Binary (go build)
+        run: CGO_ENABLED=0 GOOS=linux go build -v -o warehouse-app main.go
+
+  # --------------------------------------------------------------------------
+  # JOB 3 (CI): PRODUCTION & OEE ENGINE (NestJS + TypeScript)
+  # --------------------------------------------------------------------------
+  ci-oee-service:
+    name: "⚙️ CI: OEE Engine (NestJS)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./oee-service
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: oee-service/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build TypeScript & Verify Decorators
+        run: npm run build
+
+  # --------------------------------------------------------------------------
+  # JOB 4 (CI): SHOP-FLOOR OPERATOR DASHBOARD (Angular + Tailwind)
+  # --------------------------------------------------------------------------
+  ci-operator-dashboard:
+    name: "🖥️ CI: Operator Dashboard (Angular)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./operator-dashboard
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: operator-dashboard/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Production Bundle
+        run: npm run build
+
+  # --------------------------------------------------------------------------
+  # JOB 5 (CD): DOCKER COMPOSE ORCHESTRATION & IMAGE BUILD VERIFICATION
+  # Hanya dijalankan jika ke-4 Job CI di atas LULUS (needs: [...])
+  # --------------------------------------------------------------------------
+  cd-docker-delivery:
+    name: "🐳 CD: Build & Verify Docker Compose Stack"
+    runs-on: ubuntu-latest
+    needs:
+      - ci-incident-gateway
+      - ci-warehouse-service
+      - ci-oee-service
+      - ci-operator-dashboard
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml Schema
+        run: docker compose config -q
+
+      - name: Build All Microservice Docker Images
+        run: docker compose build

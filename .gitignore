@@ -13,6 +13,7 @@ yarn-error.log*
 # Golang (Warehouse Service)
 warehouse-service/main
 warehouse-service/warehouse-service
+warehouse-service/warehouse-app
 *.exe
 *.out
 *.test

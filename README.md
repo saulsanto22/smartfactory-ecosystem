@@ -1,5 +1,7 @@
 # 🏭 SmartFactory Ecosystem — Polyglot Microservices (MES & Andon System)
 
+![CI/CD Pipeline](https://github.com/saulsanto22/smartfactory-ecosystem/actions/workflows/ci-cd.yml/badge.svg)
+
 Ekosistem **Manufacturing Execution System (MES) Lite & Real-Time Andon Board** berbasis arsitektur **Polyglot Microservices** untuk mendigitalisasi operasional lantai pabrik (*Shop Floor*): pemantauan stok gudang kritis, kalkulasi efisiensi mesin (**OEE - Overall Equipment Effectiveness**), pelaporan dokumen audit **PDF**, unggah bukti fisik (*Single & Multiple File Upload*), serta pengamanan hak akses lintas layanan (**Stateless JWT RBAC**).
 
 ---
@@ -97,3 +99,18 @@ docker compose up --build
 - `GET /api/incidents` — Daftar alarm insiden pabrik (`OPEN` & `RESOLVED`).
 - `POST /api/incidents` — Endpoint webhook penerima alarm otomatis dari Golang & NestJS.
 - `PATCH /api/incidents/:id/resolve` — Menandai insiden selesai ditangani teknisi.
+
+---
+
+## 🔄 Arsitektur CI/CD Pipeline (GitHub Actions)
+
+Repositori ini dilengkapi pipeline otomatis di [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) yang berjalan setiap kali ada `push` atau `pull_request` ke branch `main`:
+
+1. **4 Parallel CI Jobs (Uji Kompilasi Serentak):**
+   - `ci-incident-gateway` — Menguji dependensi & sintaks **Express.js**.
+   - `ci-warehouse-service` — Menjalankan *static analysis* (`go vet`) & kompilasi binary **Golang**.
+   - `ci-oee-service` — Menguji kompilasi TypeScript & Decorator **NestJS** (`tsc`).
+   - `ci-operator-dashboard` — Menguji *production build* **Angular 18 Standalone**.
+2. **1 Gatekeeper CD Job (`cd-docker-delivery`):**
+   - Hanya berjalan apabila ke-4 job CI di atas lulus (`needs: [...]`), bertugas memvalidasi skema `docker-compose.yml` dan membangun seluruh *Docker Image* kontainer pabrik.
+

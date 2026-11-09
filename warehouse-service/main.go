@@ -60,6 +60,7 @@ func main() {
 	r.GET("/api/materials", controllers.GetMaterials)
 	r.POST("/api/materials", controllers.CreateMaterial)
 	r.POST("/api/materials/mutate", controllers.MutateMaterial)
+	r.GET("/api/materials/export/pdf", controllers.ExportMaterialsPDF)
 
 	// 7. Jalankan Server di Port 8081
 	port := "8081"

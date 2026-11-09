@@ -1,8 +1,12 @@
 package controllers
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +15,7 @@ import (
 	"warehouse-service/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jung-kurt/gofpdf"
 )
 
 /**
@@ -253,10 +258,174 @@ func MutateMaterial(c *gin.Context) {
 		return
 	}
 
+	// 6. [FEAT-2.4] PEMICU ALARM STOK KRITIS OTOMATIS KE EXPRESS.JS (Port 8083)
+	// Jika transaksi adalah barang keluar ("OUT") dan stok sekarang < MinStock,
+	// kita jalankan fungsi penembak alarm di latar belakang menggunakan kata kunci `go` (Goroutine).
+	// Jembatan Laravel: Kata `go` di depan fungsi ini persis seperti `dispatch(new SendIncidentJob())`
+	// di Laravel Queue, tetapi tanpa perlu menginstal Redis / Horizon!
+	if req.Type == "OUT" && material.Stock < material.MinStock {
+		go triggerLowStockIncident(material)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": fmt.Sprintf("Mutasi %s sebanyak %d %s untuk '%s' berhasil dicatat!", req.Type, req.Quantity, material.Unit, material.Name),
 		"data":    material,
 	})
 }
+
+/**
+ * ============================================================================
+ * 4. [FEAT-2.4] FUNGSI PENEMBAK WEBHOOK ALARM KE EXPRESS.JS (Port 8083)
+ * ============================================================================
+ * Jembatan Logika Laravel:
+ * Fungsi ini persis seperti memanggil `Http::post('http://localhost:8083/api/incidents', [...])`
+ * di dalam Laravel Job / Event Listener.
+ * ============================================================================
+ */
+func triggerLowStockIncident(material models.Material) {
+	gatewayURL := os.Getenv("INCIDENT_GATEWAY_URL")
+	if gatewayURL == "" {
+		gatewayURL = "http://localhost:8083/api/incidents"
+	}
+
+	// Siapkan body JSON yang akan dikirim ke Express.js
+	payload := map[string]string{
+		"source":   "WAREHOUSE",
+		"severity": "CRITICAL",
+		"message": fmt.Sprintf(
+			"Stok %s (%s) KRITIS! Sisa stok: %d %s (Batas minimum aman: %d %s). Segera lakukan restock!",
+			material.Name, material.SKU, material.Stock, material.Unit, material.MinStock, material.Unit,
+		),
+	}
+
+	jsonBytes, _ := json.Marshal(payload)
+
+	// Kirim HTTP POST dengan batas waktu (timeout) 5 detik
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(gatewayURL, "application/json", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		log.Printf("⚠️ [Webhook Gudang] Gagal mengirim alarm ke Incident Gateway (%s): %v\n", gatewayURL, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Printf("🚨 [Webhook Gudang] Alarm stok kritis '%s' berhasil ditembakkan ke Express.js (Status: %d)\n", material.SKU, resp.StatusCode)
+}
+
+/**
+ * ============================================================================
+ * 5. [FEAT-2.5] CETAK PDF LAPORAN STOK GUDANG (GET /api/materials/export/pdf)
+ * ============================================================================
+ * Studi Kasus Nyata Pabrik:
+ * Mencetak dokumen PDF resmi "Laporan Stok & Status Bahan Baku Gudang" untuk
+ * keperluan Audit / Stock Opname lengkap dengan Kop Pabrik, Tabel Berwarna,
+ * dan Kolom Tanda Tangan Kepala Gudang.
+ *
+ * Jembatan Logika Laravel (`laravel-dompdf` vs Golang `gofpdf`):
+ * - Di Laravel: Kita merender file HTML Blade (`Pdf::loadView(...)`) lalu diubah
+ *   jadi PDF. Kelemahannya: parsing HTML/CSS memakan banyak RAM & CPU.
+ * - Di Golang (`gofpdf`): Kita menyusun dokumen menggunakan sistem Grid/Sel
+ *   (`pdf.CellFormat(lebar, tinggi, teks, border, ...)`). Hasil PDF-nya ditulis
+ *   langsung ke memori RAM (`bytes.Buffer`) dan dikirim ke browser dalam ~3 milidetik!
+ * ============================================================================
+ */
+func ExportMaterialsPDF(c *gin.Context) {
+	// 1. Ambil seluruh data bahan baku dari MySQL
+	var materials []models.Material
+	config.DB.Order("sku asc").Find(&materials)
+
+	// 2. Inisialisasi dokumen PDF baru:
+	//    "P" = Portrait (Tegak), "mm" = satuan milimeter, "A4" = ukuran kertas
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.AddPage()
+
+	// ------------------------------------------------------------------------
+	// A. KOP SURAT / HEADER PABRIK
+	// ------------------------------------------------------------------------
+	pdf.SetFont("Arial", "B", 16)
+	pdf.CellFormat(190, 8, "SMARTFACTORY ECOSYSTEM - WAREHOUSE DIVISION", "", 1, "C", false, 0, "")
+
+	pdf.SetFont("Arial", "", 10)
+	pdf.CellFormat(190, 6, "Laporan Resmi Stok Bahan Baku & Pemantauan Safety Stock Gudang", "", 1, "C", false, 0, "")
+	pdf.CellFormat(190, 5, fmt.Sprintf("Tanggal Cetak: %s", time.Now().Format("02-01-2006 15:04:05")), "", 1, "C", false, 0, "")
+	pdf.Ln(6) // Jarak baris kosong (seperti <br> di HTML)
+
+	// ------------------------------------------------------------------------
+	// B. HEADER TABEL (Warna Latar Abu-Abu Gelap, Teks Putih)
+	// ------------------------------------------------------------------------
+	pdf.SetFillColor(30, 41, 59)   // RGB Slate-800
+	pdf.SetTextColor(255, 255, 255) // RGB Putih
+	pdf.SetFont("Arial", "B", 10)
+
+	// Total lebar kertas A4 (dikurangi margin kiri-kanan) = 190 mm
+	pdf.CellFormat(12, 9, "No", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(32, 9, "Kode SKU", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(68, 9, "Nama Bahan Baku", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(25, 9, "Stok", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(25, 9, "Min. Aman", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(28, 9, "Status", "1", 1, "C", true, 0, "")
+
+	// ------------------------------------------------------------------------
+	// C. ISI BARIS TABEL (Mirip `@foreach ($materials as $index => $item)` di Blade)
+	// ------------------------------------------------------------------------
+	pdf.SetFont("Arial", "", 10)
+
+	for i, item := range materials {
+		// Kembalikan warna teks normal (Hitam) untuk kolom biasa
+		pdf.SetTextColor(0, 0, 0)
+		pdf.SetFillColor(255, 255, 255)
+
+		pdf.CellFormat(12, 8, strconv.Itoa(i+1), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(32, 8, item.SKU, "1", 0, "C", false, 0, "")
+		pdf.CellFormat(68, 8, item.Name, "1", 0, "L", false, 0, "")
+		pdf.CellFormat(25, 8, fmt.Sprintf("%d %s", item.Stock, item.Unit), "1", 0, "C", false, 0, "")
+		pdf.CellFormat(25, 8, fmt.Sprintf("%d %s", item.MinStock, item.Unit), "1", 0, "C", false, 0, "")
+
+		// Jika status CRITICAL, beri latar merah muda & teks merah tebal!
+		if item.Status == "CRITICAL" {
+			pdf.SetFillColor(254, 226, 226) // Merah muda (Red-100)
+			pdf.SetTextColor(185, 28, 28)   // Merah tua (Red-700)
+		} else {
+			pdf.SetFillColor(220, 252, 231) // Hijau muda (Green-100)
+			pdf.SetTextColor(21, 128, 61)   // Hijau tua (Green-700)
+		}
+		pdf.SetFont("Arial", "B", 9)
+		pdf.CellFormat(28, 8, item.Status, "1", 1, "C", true, 0, "")
+		pdf.SetFont("Arial", "", 10)
+	}
+
+	// ------------------------------------------------------------------------
+	// D. KOLOM TANDA TANGAN OTORISASI AUDIT
+	// ------------------------------------------------------------------------
+	pdf.SetTextColor(0, 0, 0)
+	pdf.Ln(15)
+	pdf.CellFormat(130, 6, "", "", 0, "L", false, 0, "")
+	pdf.CellFormat(60, 6, "Mengetahui,", "", 1, "C", false, 0, "")
+	pdf.CellFormat(130, 6, "", "", 0, "L", false, 0, "")
+	pdf.CellFormat(60, 6, "Kepala Logistik & Gudang", "", 1, "C", false, 0, "")
+	pdf.Ln(18)
+	pdf.CellFormat(130, 6, "", "", 0, "L", false, 0, "")
+	pdf.SetFont("Arial", "BU", 10)
+	pdf.CellFormat(60, 6, "( Staf / Supervisor Gudang )", "", 1, "C", false, 0, "")
+
+	// ------------------------------------------------------------------------
+	// E. TULIS KE MEMORY STREAM & KIRIM SEBAGAI FILE PDF KE BROWSER
+	// Jembatan Laravel: Sepadan dengan `return $pdf->download('laporan-stok-gudang.pdf');`
+	// ------------------------------------------------------------------------
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Gagal men-generate dokumen PDF gudang.",
+		})
+		return
+	}
+
+	fileName := fmt.Sprintf("laporan-stok-gudang-%s.pdf", time.Now().Format("20060102"))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+	c.Data(http.StatusOK, "application/pdf", buf.Bytes())
+}
+
+
 

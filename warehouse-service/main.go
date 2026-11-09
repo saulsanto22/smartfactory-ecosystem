@@ -6,6 +6,7 @@ import (
 	"os"
 	"warehouse-service/config"
 	"warehouse-service/controllers"
+	"warehouse-service/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +36,7 @@ func main() {
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-Role, X-User-Name")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -57,10 +58,17 @@ func main() {
 	})
 
 	// 7. Route Modul Gudang (Sepadan dengan `routes/api.php` di Laravel)
+	// Endpoint GET (Lihat Stok & Cetak PDF) bebas diakses semua jabatan,
+	// sedangkan POST (Tambah Barang & Mutasi Stok) dikunci khusus WAREHOUSE_STAFF & PLANT_MANAGER!
 	r.GET("/api/materials", controllers.GetMaterials)
-	r.POST("/api/materials", controllers.CreateMaterial)
-	r.POST("/api/materials/mutate", controllers.MutateMaterial)
 	r.GET("/api/materials/export/pdf", controllers.ExportMaterialsPDF)
+
+	warehouseProtected := r.Group("/api")
+	warehouseProtected.Use(middleware.RequireRoles("WAREHOUSE_STAFF", "PLANT_MANAGER"))
+	{
+		warehouseProtected.POST("/materials", controllers.CreateMaterial)
+		warehouseProtected.POST("/materials/mutate", controllers.MutateMaterial)
+	}
 
 	// 7. Jalankan Server di Port 8081
 	port := "8081"

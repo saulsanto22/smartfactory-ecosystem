@@ -5,6 +5,7 @@ import {
   Body,
   Res,
   UseInterceptors,
+  UseGuards,
   UploadedFiles,
   BadRequestException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { Response } from 'express';
 import { OeeService } from './oee.service';
+import { ProductionRolesGuard } from './roles.guard';
 
 /**
  * ============================================================================
@@ -55,9 +57,10 @@ export class OeeController {
     };
   }
 
-  // 3. [FEAT-3.1] Hitung OEE + Multiple File Upload (POST /api/oee/calculate)
-  // Menerima maksimal 5 file foto sekaligus pada field "photos"
+  // 3. [FEAT-3.1 & FEAT-5.2] Hitung OEE + Multiple File Upload (POST /api/oee/calculate)
+  // DIKUNCI DENGAN RBAC GUARD: Hanya boleh diakses oleh PRODUCTION_OPERATOR & PLANT_MANAGER!
   @Post('oee/calculate')
+  @UseGuards(ProductionRolesGuard)
   @UseInterceptors(
     FilesInterceptor('photos', 5, {
       storage: diskStorage({

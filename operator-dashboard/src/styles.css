@@ -1,0 +1,4 @@
+/* Global Stylesheet - Seluruh styling utama menggunakan Tailwind Utility Classes di HTML */
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}

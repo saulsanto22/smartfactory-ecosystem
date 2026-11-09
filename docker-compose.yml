@@ -1,47 +1,127 @@
 # ============================================================================
-# SMARTFACTORY ECOSYSTEM - DOCKER COMPOSE
+# SMARTFACTORY ECOSYSTEM - FULL POLYGLOT MICROSERVICES DOCKER COMPOSE
+# ============================================================================
 # Jembatan Logika Laravel:
-# File ini sepadan dengan `docker-compose.yml` bawaan Laravel Sail.
-# Bedanya, nantinya file ini akan mengorkestrasi 4 service berbeda bahasa
-# (Golang, NestJS, Express, Angular) di dalam satu jaringan virtual pabrik.
+# File ini sepadan dengan `docker-compose.yml` pada Laravel Sail, namun
+# mengorkestrasi 1 Database MySQL + 3 Backend Berbeda Bahasa + 1 Frontend Angular
+# dengan perintah tunggal: `docker compose up --build`
 # ============================================================================
 
 services:
   # --------------------------------------------------------------------------
-  # INFRASTRUKTUR DATABASE PUSAT PABRIK (MySQL 8.0)
+  # 1. INFRASTRUKTUR DATABASE PUSAT PABRIK (MySQL 8.0 - Port Host 3307)
   # --------------------------------------------------------------------------
   mysql-db:
     image: mysql:8.0
     container_name: smartfactory-mysql
     restart: unless-stopped
     environment:
-      # Sepadan dengan DB_DATABASE, DB_USERNAME, DB_PASSWORD di file .env Laravel
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: smartfactory_db
       MYSQL_USER: factory_user
       MYSQL_PASSWORD: factory_password
     ports:
-      # Port 3307 di komputer host -> Port 3306 di dalam container Docker
-      # Menggunakan 3307 di sisi host agar tidak bentrok jika di laptop Anda
-      # sudah ada MySQL lokal (Laragon/XAMPP/DBngin) yang memakai port 3306.
       - "3307:3306"
     volumes:
-      # Named volume agar data stok gudang & OEE tidak hilang saat container dimatikan
       - mysql_factory_data:/var/lib/mysql
     networks:
       - smartfactory-net
     healthcheck:
-      # Memastikan MySQL benar-benar siap menerima koneksi sebelum backend Go/NestJS menyala
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-# Jaringan internal virtual antar container (seperti LAN lokal di dalam pabrik)
+  # --------------------------------------------------------------------------
+  # 2. MODUL 3: INCIDENT ALERT GATEWAY & JWT AUTH (Express.js - Port 8083)
+  # --------------------------------------------------------------------------
+  incident-gateway:
+    build: ./incident-gateway
+    container_name: smartfactory-incident-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 8083
+      JWT_SECRET: smartfactory-super-secret-key-2026
+    ports:
+      - "8083:8083"
+    networks:
+      - smartfactory-net
+
+  # --------------------------------------------------------------------------
+  # 3. MODUL 1: WAREHOUSE & INVENTORY SERVICE (Golang + Gin + GORM - Port 8081)
+  # --------------------------------------------------------------------------
+  warehouse-service:
+    build: ./warehouse-service
+    container_name: smartfactory-warehouse
+    restart: unless-stopped
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+      incident-gateway:
+        condition: service_started
+    environment:
+      PORT: 8081
+      DB_HOST: mysql-db
+      DB_PORT: 3306
+      DB_USER: factory_user
+      DB_PASSWORD: factory_password
+      DB_NAME: smartfactory_db
+      INCIDENT_GATEWAY_URL: http://incident-gateway:8083/api/incidents
+      JWT_SECRET: smartfactory-super-secret-key-2026
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./warehouse-service/uploads:/app/uploads
+    networks:
+      - smartfactory-net
+
+  # --------------------------------------------------------------------------
+  # 4. MODUL 2: PRODUCTION & OEE ENGINE (NestJS + TypeORM - Port 8082)
+  # --------------------------------------------------------------------------
+  oee-service:
+    build: ./oee-service
+    container_name: smartfactory-oee
+    restart: unless-stopped
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+      incident-gateway:
+        condition: service_started
+    environment:
+      PORT: 8082
+      DB_HOST: mysql-db
+      DB_PORT: 3306
+      DB_USER: factory_user
+      DB_PASSWORD: factory_password
+      DB_NAME: smartfactory_db
+      INCIDENT_GATEWAY_URL: http://incident-gateway:8083/api/incidents
+      JWT_SECRET: smartfactory-super-secret-key-2026
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./oee-service/uploads:/app/uploads
+    networks:
+      - smartfactory-net
+
+  # --------------------------------------------------------------------------
+  # 5. MODUL 4: SHOP-FLOOR OPERATOR DASHBOARD (Angular + Tailwind - Port 4200)
+  # --------------------------------------------------------------------------
+  operator-dashboard:
+    build: ./operator-dashboard
+    container_name: smartfactory-dashboard
+    restart: unless-stopped
+    depends_on:
+      - warehouse-service
+      - oee-service
+      - incident-gateway
+    ports:
+      - "4200:4200"
+    networks:
+      - smartfactory-net
+
 networks:
   smartfactory-net:
     driver: bridge
 
-# Penyimpanan persisten di sisi host
 volumes:
   mysql_factory_data:

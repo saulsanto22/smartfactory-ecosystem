@@ -10,4 +10,4 @@ RUN npm run build && mkdir -p /app/uploads
 
 EXPOSE 8082
 
-CMD ["node", "dist/src/main.js"]
+CMD ["node", "dist/main.js"]
